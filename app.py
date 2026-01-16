@@ -39,23 +39,23 @@ def generate_quiz(text):
     if len(text) > max_text_length:
         text = text[:max_text_length]
     
-    prompt = f"""아래 PDF 내용을 분석하여 핵심 개념을 테스트하는 객관식 퀴즈 5문제를 생성해주세요.
+    prompt = """아래 PDF 내용을 분석하여 핵심 개념을 테스트하는 객관식 퀴즈 5문제를 생성해주세요.
 
 PDF 내용:
-{text}
+""" + text + """
 
 다음 JSON 형식으로 정확히 응답해주세요:
 
-{{
+{
   "questions": [
-    {{
+    {
       "question": "질문 내용",
       "options": ["선택지1", "선택지2", "선택지3", "선택지4"],
       "correct_answer": 0,
       "explanation": "정답 해설"
-    }}
+    }
   ]
-}}
+}
 
 규칙:
 1. 정확히 5문제를 생성하세요

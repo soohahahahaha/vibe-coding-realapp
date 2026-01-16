@@ -38,20 +38,6 @@ def extract_pdf_text(pdf_file):
         text += page.extract_text()
     return text
 
-def split_text_into_chunks(text, chunk_size=3000, overlap=300):
-    """텍스트를 청크로 분할 (LangChain 없이)"""
-    chunks = []
-    start = 0
-    text_length = len(text)
-    
-    while start < text_length:
-        end = start + chunk_size
-        chunk = text[start:end]
-        chunks.append(chunk)
-        start += chunk_size - overlap
-    
-    return chunks
-
 def generate_quiz(text):
     """Gemini를 사용하여 퀴즈 생성"""
     model = genai.GenerativeModel('gemini-2.5-flash')
@@ -61,20 +47,20 @@ def generate_quiz(text):
     if len(text) > max_text_length:
         text = text[:max_text_length]
     
-    prompt = f"""
-아래 PDF 내용을 분석하여 핵심 개념을 테스트하는 객관식 퀴즈 5문제를 생성해주세요.
+    prompt = f"""아래 PDF 내용을 분석하여 핵심 개념을 테스트하는 객관식 퀴즈 5문제를 생성해주세요.
 
 PDF 내용:
 {text}
 
-다음 JSON 형식으로 정확히 응답해주세요:
+다음 JSON 형식으로 정확히 응답해주세요. 다른 텍스트 없이 JSON만 출력하세요:
+
 {{
   "questions": [
     {{
       "question": "질문 내용",
       "options": ["선택지1", "선택지2", "선택지3", "선택지4"],
       "correct_answer": 0,
-      "explanation": "정답 해설 (PDF 내용 기반)"
+      "explanation": "정답 해설"
     }}
   ]
 }}
@@ -82,15 +68,13 @@ PDF 내용:
 규칙:
 1. 정확히 5문제를 생성하세요
 2. correct_answer는 0-3 사이의 인덱스입니다
-3. 해설은 PDF 내용을 근거로 상세하게 작성하세요
-4. JSON 형식만 출력하고 다른 텍스트는 포함하지 마세요
-"""
+3. 해설은 PDF 내용을 근거로 상세하게 작성하세요"""
     
     try:
         response = model.generate_content(prompt)
         response_text = response.text.strip()
         
-        # JSON 추출 (마크다운 코드 블록 제거)
+        # JSON 추출
         json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
         if json_match:
             response_text = json_match.group(1)
@@ -99,7 +83,6 @@ PDF 내용:
         return quiz_data
     except json.JSONDecodeError as e:
         st.error(f"JSON 파싱 오류: {str(e)}")
-        st.text(f"응답 내용: {response_text[:500]}")
         return None
     except Exception as e:
         st.error(f"퀴즈 생성 중 오류 발생: {str(e)}")
@@ -126,13 +109,11 @@ with st.sidebar:
         if st.button("🎯 퀴즈 생성하기", use_container_width=True):
             with st.spinner("PDF를 분석하고 퀴즈를 생성하는 중..."):
                 try:
-                    # PDF 텍스트 추출
                     text = extract_pdf_text(uploaded_file)
                     
                     if not text.strip():
                         st.error("PDF에서 텍스트를 추출할 수 없습니다.")
                     else:
-                        # 퀴즈 생성
                         quiz_data = generate_quiz(text)
                         
                         if quiz_data and 'questions' in quiz_data:
@@ -161,12 +142,9 @@ if st.session_state.quiz_data is None:
 else:
     questions = st.session_state.quiz_data['questions']
     
-    # 모든 문제를 답변했는지 확인
     if len(st.session_state.user_answers) == len(questions):
-        # 결과 화면
         st.success("🎉 모든 문제를 완료했습니다!")
         
-        # 점수 계산
         correct_count = sum(
             1 for q_idx, answer in st.session_state.user_answers.items()
             if answer == questions[q_idx]['correct_answer']
@@ -182,9 +160,8 @@ else:
             st.metric("점수", f"{score:.0f}점")
         
         st.divider()
-        
-        # 상세 결과
         st.subheader("📊 상세 결과")
+        
         for idx, question in enumerate(questions):
             user_answer = st.session_state.user_answers.get(idx, -1)
             correct = user_answer == question['correct_answer']
@@ -193,16 +170,13 @@ else:
                 st.write(f"**당신의 답변:** {question['options'][user_answer] if user_answer >= 0 else '미응답'}")
                 st.write(f"**정답:** {question['options'][question['correct_answer']]}")
                 st.info(f"**해설:** {question['explanation']}")
-    
     else:
-        # 현재 문제 표시
         current_q = st.session_state.current_question
         question = questions[current_q]
         
         st.subheader(f"문제 {current_q + 1} / {len(questions)}")
         st.write(f"### {question['question']}")
         
-        # 폼으로 답변 제출
         with st.form(key=f"quiz_form_{current_q}"):
             selected_option = st.radio(
                 "정답을 선택하세요:",
@@ -211,28 +185,27 @@ else:
                 key=f"option_{current_q}"
             )
             
-            submitted = st.form_submit_button("제출하기", use_container_width=True)
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                submitted = st.form_submit_button("✅ 제출하기", use_container_width=True)
             
             if submitted:
                 st.session_state.user_answers[current_q] = selected_option
                 
-                # 정답 확인
                 if selected_option == question['correct_answer']:
                     st.success("🎉 정답입니다!")
                 else:
                     st.error(f"❌ 오답입니다. 정답은 '{question['options'][question['correct_answer']]}'입니다.")
                     st.info(f"**해설:** {question['explanation']}")
                 
-                # 다음 문제로 이동
                 if current_q + 1 < len(questions):
-                    if st.button("다음 문제로 →"):
+                    if st.button("다음 문제로 →", key="next_btn"):
                         st.session_state.current_question += 1
                         st.rerun()
                 else:
-                    if st.button("결과 보기"):
+                    if st.button("결과 보기", key="result_btn"):
                         st.rerun()
 
-# 푸터
 st.divider()
 st.caption("Made with ❤️ using Streamlit & Google Gemini 2.5 Flash")
 ```

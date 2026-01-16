@@ -4,34 +4,28 @@ from PyPDF2 import PdfReader
 import json
 import re
 
-# 페이지 설정
 st.set_page_config(
     page_title="AI 학습 멘토",
     page_icon="📚",
     layout="wide"
 )
 
-# API 키 설정
 try:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 except Exception as e:
     st.error("⚠️ API 키를 설정해주세요. Streamlit Secrets에 GEMINI_API_KEY를 추가하세요.")
     st.stop()
 
-# 세션 상태 초기화
 if 'quiz_data' not in st.session_state:
     st.session_state.quiz_data = None
 if 'current_question' not in st.session_state:
     st.session_state.current_question = 0
 if 'user_answers' not in st.session_state:
     st.session_state.user_answers = {}
-if 'score' not in st.session_state:
-    st.session_state.score = 0
-if 'quiz_submitted' not in st.session_state:
-    st.session_state.quiz_submitted = False
+if 'answer_submitted' not in st.session_state:
+    st.session_state.answer_submitted = False
 
 def extract_pdf_text(pdf_file):
-    """PDF에서 텍스트 추출"""
     pdf_reader = PdfReader(pdf_file)
     text = ""
     for page in pdf_reader.pages:
@@ -39,10 +33,8 @@ def extract_pdf_text(pdf_file):
     return text
 
 def generate_quiz(text):
-    """Gemini를 사용하여 퀴즈 생성"""
     model = genai.GenerativeModel('gemini-2.5-flash')
     
-    # 텍스트가 너무 길면 앞부분만 사용
     max_text_length = 10000
     if len(text) > max_text_length:
         text = text[:max_text_length]
@@ -52,7 +44,7 @@ def generate_quiz(text):
 PDF 내용:
 {text}
 
-다음 JSON 형식으로 정확히 응답해주세요. 다른 텍스트 없이 JSON만 출력하세요:
+다음 JSON 형식으로 정확히 응답해주세요:
 
 {{
   "questions": [
@@ -68,39 +60,36 @@ PDF 내용:
 규칙:
 1. 정확히 5문제를 생성하세요
 2. correct_answer는 0-3 사이의 인덱스입니다
-3. 해설은 PDF 내용을 근거로 상세하게 작성하세요"""
+3. 해설은 PDF 내용을 근거로 상세하게 작성하세요
+4. JSON만 출력하고 다른 텍스트는 포함하지 마세요"""
     
     try:
         response = model.generate_content(prompt)
         response_text = response.text.strip()
         
-        # JSON 추출
         json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
         if json_match:
             response_text = json_match.group(1)
         
         quiz_data = json.loads(response_text)
         return quiz_data
-    except json.JSONDecodeError as e:
-        st.error(f"JSON 파싱 오류: {str(e)}")
-        return None
     except Exception as e:
-        st.error(f"퀴즈 생성 중 오류 발생: {str(e)}")
+        st.error(f"퀴즈 생성 중 오류: {str(e)}")
         return None
 
 def reset_quiz():
-    """퀴즈 초기화"""
     st.session_state.quiz_data = None
     st.session_state.current_question = 0
     st.session_state.user_answers = {}
-    st.session_state.score = 0
-    st.session_state.quiz_submitted = False
+    st.session_state.answer_submitted = False
 
-# UI 시작
+def next_question():
+    st.session_state.current_question += 1
+    st.session_state.answer_submitted = False
+
 st.title("📚 AI 학습 멘토")
 st.markdown("### PDF를 업로드하고 맞춤형 퀴즈로 학습하세요!")
 
-# 사이드바
 with st.sidebar:
     st.header("📁 PDF 업로드")
     uploaded_file = st.file_uploader("PDF 파일을 선택하세요", type=['pdf'])
@@ -120,12 +109,11 @@ with st.sidebar:
                             st.session_state.quiz_data = quiz_data
                             st.session_state.current_question = 0
                             st.session_state.user_answers = {}
-                            st.session_state.score = 0
-                            st.session_state.quiz_submitted = False
+                            st.session_state.answer_submitted = False
                             st.success("✅ 퀴즈가 생성되었습니다!")
                             st.rerun()
                         else:
-                            st.error("퀴즈 생성에 실패했습니다. 다시 시도해주세요.")
+                            st.error("퀴즈 생성에 실패했습니다.")
                 except Exception as e:
                     st.error(f"오류 발생: {str(e)}")
     
@@ -136,7 +124,6 @@ with st.sidebar:
             reset_quiz()
             st.rerun()
 
-# 메인 영역
 if st.session_state.quiz_data is None:
     st.info("👈 왼쪽 사이드바에서 PDF를 업로드하고 퀴즈를 생성하세요.")
 else:
@@ -185,32 +172,30 @@ else:
                 key=f"option_{current_q}"
             )
             
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                submitted = st.form_submit_button("✅ 제출하기", use_container_width=True)
+            submitted = st.form_submit_button("✅ 제출하기", use_container_width=True)
+        
+        if submitted:
+            st.session_state.user_answers[current_q] = selected_option
+            st.session_state.answer_submitted = True
             
-            if submitted:
-                st.session_state.user_answers[current_q] = selected_option
-                
-                if selected_option == question['correct_answer']:
-                    st.success("🎉 정답입니다!")
-                else:
-                    st.error(f"❌ 오답입니다. 정답은 '{question['options'][question['correct_answer']]}'입니다.")
-                    st.info(f"**해설:** {question['explanation']}")
-                
-                if current_q + 1 < len(questions):
-                    if st.button("다음 문제로 →", key="next_btn"):
-                        st.session_state.current_question += 1
-                        st.rerun()
-                else:
-                    if st.button("결과 보기", key="result_btn"):
-                        st.rerun()
+            if selected_option == question['correct_answer']:
+                st.success("🎉 정답입니다!")
+            else:
+                st.error(f"❌ 오답입니다. 정답은 '{question['options'][question['correct_answer']]}'입니다.")
+                st.info(f"**해설:** {question['explanation']}")
+            
+            if current_q + 1 < len(questions):
+                if st.button("다음 문제로 →", on_click=next_question):
+                    pass
+            else:
+                if st.button("결과 보기"):
+                    st.rerun()
 
 st.divider()
 st.caption("Made with ❤️ using Streamlit & Google Gemini 2.5 Flash")
 ```
 
-## requirements.txt (동일)
+## requirements.txt
 ```
 streamlit>=1.31.0
 google-generativeai>=0.3.2

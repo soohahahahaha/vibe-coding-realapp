@@ -1,7 +1,6 @@
 import streamlit as st
 import google.generativeai as genai
 from PyPDF2 import PdfReader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 import json
 import re
 
@@ -39,28 +38,34 @@ def extract_pdf_text(pdf_file):
         text += page.extract_text()
     return text
 
-def split_text(text):
-    """텍스트를 청크로 분할"""
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=3000,
-        chunk_overlap=300,
-        length_function=len
-    )
-    chunks = text_splitter.split_text(text)
+def split_text_into_chunks(text, chunk_size=3000, overlap=300):
+    """텍스트를 청크로 분할 (LangChain 없이)"""
+    chunks = []
+    start = 0
+    text_length = len(text)
+    
+    while start < text_length:
+        end = start + chunk_size
+        chunk = text[start:end]
+        chunks.append(chunk)
+        start += chunk_size - overlap
+    
     return chunks
 
-def generate_quiz(text_chunks):
+def generate_quiz(text):
     """Gemini를 사용하여 퀴즈 생성"""
-    model = genai.GenerativeModel('gemini-2.0-flash-exp')
+    model = genai.GenerativeModel('gemini-2.5-flash')
     
-    # 텍스트 청크 결합 (토큰 제한 고려)
-    combined_text = "\n\n".join(text_chunks[:3])
+    # 텍스트가 너무 길면 앞부분만 사용
+    max_text_length = 10000
+    if len(text) > max_text_length:
+        text = text[:max_text_length]
     
     prompt = f"""
 아래 PDF 내용을 분석하여 핵심 개념을 테스트하는 객관식 퀴즈 5문제를 생성해주세요.
 
 PDF 내용:
-{combined_text}
+{text}
 
 다음 JSON 형식으로 정확히 응답해주세요:
 {{
@@ -92,6 +97,10 @@ PDF 내용:
         
         quiz_data = json.loads(response_text)
         return quiz_data
+    except json.JSONDecodeError as e:
+        st.error(f"JSON 파싱 오류: {str(e)}")
+        st.text(f"응답 내용: {response_text[:500]}")
+        return None
     except Exception as e:
         st.error(f"퀴즈 생성 중 오류 발생: {str(e)}")
         return None
@@ -116,23 +125,28 @@ with st.sidebar:
     if uploaded_file is not None:
         if st.button("🎯 퀴즈 생성하기", use_container_width=True):
             with st.spinner("PDF를 분석하고 퀴즈를 생성하는 중..."):
-                # PDF 텍스트 추출
-                text = extract_pdf_text(uploaded_file)
-                
-                # 텍스트 분할
-                chunks = split_text(text)
-                
-                # 퀴즈 생성
-                quiz_data = generate_quiz(chunks)
-                
-                if quiz_data and 'questions' in quiz_data:
-                    st.session_state.quiz_data = quiz_data
-                    st.session_state.current_question = 0
-                    st.session_state.user_answers = {}
-                    st.session_state.score = 0
-                    st.session_state.quiz_submitted = False
-                    st.success("✅ 퀴즈가 생성되었습니다!")
-                    st.rerun()
+                try:
+                    # PDF 텍스트 추출
+                    text = extract_pdf_text(uploaded_file)
+                    
+                    if not text.strip():
+                        st.error("PDF에서 텍스트를 추출할 수 없습니다.")
+                    else:
+                        # 퀴즈 생성
+                        quiz_data = generate_quiz(text)
+                        
+                        if quiz_data and 'questions' in quiz_data:
+                            st.session_state.quiz_data = quiz_data
+                            st.session_state.current_question = 0
+                            st.session_state.user_answers = {}
+                            st.session_state.score = 0
+                            st.session_state.quiz_submitted = False
+                            st.success("✅ 퀴즈가 생성되었습니다!")
+                            st.rerun()
+                        else:
+                            st.error("퀴즈 생성에 실패했습니다. 다시 시도해주세요.")
+                except Exception as e:
+                    st.error(f"오류 발생: {str(e)}")
     
     if st.session_state.quiz_data:
         st.divider()
@@ -220,12 +234,11 @@ else:
 
 # 푸터
 st.divider()
-st.caption("Made with ❤️ using Streamlit & Google Gemini")
+st.caption("Made with ❤️ using Streamlit & Google Gemini 2.5 Flash")
 ```
 
-## requirements.txt
+## requirements.txt (동일)
 ```
-streamlit==1.31.0
-google-generativeai==0.3.2
-PyPDF2==3.0.1
-langchain==0.1.0
+streamlit>=1.31.0
+google-generativeai>=0.3.2
+PyPDF2>=3.0.1

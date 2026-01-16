@@ -121,21 +121,25 @@ else:
                               format_func=lambda x: question['options'][x])
             submitted = st.form_submit_button("제출하기", use_container_width=True)
         
-        if submitted:
+        if submitted and current_q not in st.session_state.user_answers:
             st.session_state.user_answers[current_q] = selected
+            st.rerun()
+        
+        if current_q in st.session_state.user_answers:
+            user_answer = st.session_state.user_answers[current_q]
             
-            if selected == question['correct_answer']:
+            if user_answer == question['correct_answer']:
                 st.success("🎉 정답입니다!")
             else:
                 st.error(f"❌ 오답입니다. 정답: {question['options'][question['correct_answer']]}")
                 st.info(f"**해설:** {question['explanation']}")
             
             if current_q + 1 < len(questions):
-                if st.button("다음 문제로", key="next"):
+                if st.button("다음 문제로 →", key="next", use_container_width=True):
                     st.session_state.current_question += 1
                     st.rerun()
             else:
-                if st.button("결과 보기", key="result"):
+                if st.button("결과 보기", key="result", use_container_width=True):
                     st.rerun()
 
 st.divider()
